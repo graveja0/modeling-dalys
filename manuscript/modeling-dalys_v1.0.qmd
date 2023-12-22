@@ -1,0 +1,1047 @@
+---
+title: "Modeling Disability-Adjusted Life Years for Policy and Decision Analysis: A Tutorial"
+format:
+    pdf:
+      fig-pos: H
+      include-in-header:
+        text: |
+          \usepackage{lipsum}
+          \usepackage{setspace}
+          \usepackage{nicematrix}
+          \usepackage{relsize}
+          \NiceMatrixOptions{cell-space-limits=1pt}
+          \onehalfspacing
+          \linespread{2}
+      df-print: kable
+      highlight-style: zenburn
+fontsize: 12pt
+geometry: margin=1in
+editor: source
+bibliography: bibliography.bib
+editor_options: 
+  chunk_output_type: console
+abstract-title: Abstract
+abstract: |
+  This study outlines a methodological framework for joint modeling of Disability- and Quality-Adjusted Life Year outcomes. Our primary focus is on how transition matrices and state occupancy payoffs in discrete-time Markov cohort models can be structured to calculate years of life lost to disability (YLD) and years of life lost to premature death (YLL), in addition to quality-adjusted life year (QALY) outcomes. We also demonstrate how our modeling framework extends directly to microsimulation and (in part) to continuous time discrete event simulation (DES) models. In a tutorial application, we use our joing modeling framework to construct a discrete time Markov cohort natural history model for cardiovascular disease that estimates DALY and QALY outcomes for any country, region, or setting represented in the 2020 Global Burden of Disease data.
+---
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+library(tidyverse)
+library(MASS)
+# library(Matrix)
+library(expm)
+library(knitr)
+library(kableExtra)
+options(scipen = 5) 
+transpose <- purrr::transpose
+select <- dplyr::select
+```
+
+\doublespacing
+
+Disability-adjusted life years (DALYs) measure disease burden in a population. Conceptualized in the Global Burden of Disease (GBD) study , DALYs quantify the total sum of years of life lost due to disability attributable to a disease (YLD), plus years of life lost to premature mortality from the disease (YLL; i.e., DALY = YLD + YLL; @Murray1997).
+
+In addition to their role in describing levels and trends in disease burdens worldwide, DALYs are a primary health outcome in cost-effectiveness evaluations of health interventions in low- and middle-income countries (LMICs). In these settings, resource allocation decisions are guided by modeled assessments of the incremental costs per DALY averted under alternative (often competing) strategies to improve population health.[^1]
+
+[^1]: The adoption of DALYs over other common health outcomes in health economics (e.g., quality-adjusted life years, or QALYs) stems from several practical and theoretical considerations. See @Feng2020 and @Wilkinson2016 for futher discussion.
+
+Despite the prominent role of DALYs in global health policy, scant methodological guidance is available for adapting and/or structuring decision analytic models for DALY outcomes. This methodological gap has its roots in health economics education, where textbooks and training exercises focus almost exclusively on calcualting Quality-Adjusted Life Year (QALY) outcomes---the primary health outcome used in high-income countries (HICs). DALYs differ from QALYs in important and model-relevant respects, including the use of reference life tables to calculate YLLs and standardized disability weights to calculate YLDs.[^2] To the extent DALY-specific modeling considerations are taught, they are often considered in isolation and without a firm methodological grounding in *how* a model can be structured to accurately measure DALY outcomes.
+
+[^2]: In contrast, QALYs are calculated based on utility weights derived from general and patient surveys. See @Feng2020 and @Wilkinson2016 for futher discussion.
+
+As a consequence, and in practice, health economic applications often resort to shortcuts for calculating DALYs. For example, practitioners constructing Markov cohort models may simply estimate a "QALY-like" DALY that is based on a disease state occupancy payoff of one minus the disability weight. These shortcuts may also involve accumulating person-years in an absorbing death state as an estimate of YLLs. As this study will show, these shortcuts do not provide an accurate representation of DALY levels in a population---a common quantity of interest in global health policy evaluation.
+
+This study's objective is to fill this methodological gap by outlining a foundation for direct incorporation of DALY outcomes in common decision modeling frameworks. Our primary focus is on how transition matrices and state occupancy payoffs in discrete-time Markov cohort models can be structured to calculate YLLs and YLDs---however, this framework extends directly to microsimulation and (in part) to continuous time discrete event simulation (DES) models. As such, our study provides a comprehensive roadmap for incorporating DALY outcomes into common decision modeling frameworks.
+
+A key tool we present is the incorporation of "non-Markovian" trackers into state transition matrices. These trackers facilitate YLL calculation in complex disease models while maintaining traditional Markovian model components (e.g., state occupancy for a closed cohort in each discrete time cycle) used to calculate other outcomes such as YLDs and QALYs. In other words, our approach facilitates *simultaneous* calculation of QALYs and DALYs in decision models. This framework opens up estimation of additional decision-relevant outcomes for models in HICs, and facilitates adaptation of models (perhaps originally designed for HICs) to guide decisionmaking based on DALY health outcomes in LMICs. In a tutorial application, we use our framework to construct a discrete time Markov cohort natural history model for cardiovascular disease that estimates DALY and QALY outcomes for any country, region, or setting represented in the 2020 GBD. Our application model is developed and hosted in an open source environment for both R and Microsoft Excel.
+
+# Background
+
+## Disability-Adjusted Life Years as a Population Health Measure
+
+The DALY measure is calculated from two scores. First, medical conditions are assigned disability weights ranging from zero to one, with zero representing the absence of a medical condition and one representing the highest burden a medical condition can inflict, equivocal to death. Disease morbidity is defined as the disability weight multiplied by the number of years a person has lived with the disability. \[TK a sentence on where the disability weights come from.\]
+
+Next, mortality is defined as the number of years of life lost which is calculated from a 'standard' life expectancy minus the age of premature death. The DALY score equals the sum of the described morbidity and mortality measures. In the original GBD study, age-weighting and time discounting practices were applied to DALY calculations [@Murray1997]. These methods respectively weighted the burden of illness greater during adulthood than early childhood/old age and valued present poor health over future years of illness by discounting DALY measures by 3% per year. From 2010 onwards, both practices were discontinued to make the DALY a more descriptive measure, assuming equal value to every year of life.
+
+## Debate over DALYs
+
+While the creation of the DALY model was an important step in public health research, it has received scrutiny as an evaluative measure due to its inherent assumptions and value judgements. For example, when calculating years of life lost, a major contributor of DALYs, the choice of reference life tables. Specifically, how do you define the upper limit of years of life lived (YLL), should the average life expectancy be applied universally, and should this number be fixed or progressive? One approach is to determine YLL by a standard expected years of life lost?
+
+-   talk about endogenous vs. exogenous life tables
+
+## Use of DALYs in Decision Analysis
+
+For YLL:
+
+$$
+YLL= \frac{1}{r}\left(1-e^{-r Ex}\right)
+$$ {#eq-yll} where $r$ is the (annual) discount rate and $Ex$ is remaining life expectancy at the time of death.
+
+For YLD:
+
+$$
+YLD = D  \left ( \frac{1}{r}\left(1-e^{-rL }\right) \right )
+$$ {#eq-yld} where $r$ is the (annual) discount rate, $D$ is the disability weight, and $L$ is the number of years lived with disability.
+
+# Structuring a Discrete-Time Model for YLL and YLD Outcomes
+
+This section outlines a process for structuring a discrete time Markov cohort model to estimate DALY outcomes. To demonstrate our method, we build on a progressive disease model in which healthy individuals develop a chronic disease with two health states ("Sick" and "Sicker"). Individuals can also transition to an absorbing death state due to causes unrelated to the disease (i.e., "background" mortality), or due to disease-specific causes [@alarid-escudero2022]. Once ill, individuals do not transition back to a healthier state---though this is merely a simplification and our approach is generally applicable in models with multi-way transitions. In addition, the model structure is homogeneous (i.e., transition rates do not vary as a function of time ). Again, this is a simplification to distill model complexity down to only those components needed to demonstrate our DALY approach; the CVD natural history model developed in the application section will introduce inhomogeneity based on age-dependent transition intensities.
+
+```{dot}
+//| fig-align: center
+//| fig-width: 6
+//| fig-cap: "State transition diagram for progressive disease model."
+//| label: fig-model1
+//| 
+digraph G {
+    layout=neato;
+    overlap=false;
+    splines=true;
+    Healthy [pos="0,0!"];
+    Healthy:w -> Healthy:w [minlen=5000];
+    Sick [pos="1.5,-1!"];
+    Sicker [pos="3,-1!"];
+    Dead [pos="4.5,0!"];
+    Dead:e -> Dead:e;
+    Sick:w -> Sick:w;
+    Sicker:e -> Sicker:e; 
+    Healthy -> Sick [label="\nrHS1"]; 
+    Healthy -> Dead [label="rD"]; 
+    Sick -> Sicker [label="rS1S2"];
+    Sicker -> Dead:s [label="\n      rS2D + rD"]; 
+    Sick -> Dead [label="rS1D + rD"];
+  }
+```
+
+```{r, echo = FALSE}
+
+ExR = 
+    # Global Burden of Disease Collaborative Network. Global Burden of Disease Study 
+    # 2019 (GBD 2019) Reference Life Table. Seattle, United States of America: 
+    # Institute for Health Metrics and Evaluation (IHME), 2020
+    tibble::tribble(
+        ~Age, ~Life.Expectancy,
+        0L,       88.8718951,
+        1L,      88.00051053,
+        5L,      84.03008056,
+        10L,      79.04633476,
+        15L,       74.0665492,
+        20L,      69.10756792,
+        25L,      64.14930031,
+        30L,       59.1962771,
+        35L,      54.25261364,
+        40L,      49.31739311,
+        45L,      44.43332057,
+        50L,      39.63473787,
+        55L,      34.91488095,
+        60L,      30.25343822,
+        65L,      25.68089534,
+        70L,      21.28820012,
+        75L,      17.10351469,
+        80L,      13.23872477,
+        85L,      9.990181244,
+        90L,      7.617724915,
+        95L,      5.922359078
+    )
+
+fExR <- function(x) pmax(0,unname(Hmisc::approxExtrap(ExR$Age, ExR$Life.Expectancy,xout = x)$y))
+
+alt_simp_coef <- function(i) c(17, 59, 43, 49, rep(48, i-8), 49, 43, 59, 17) / 48
+alt_simp      <- function(x,h) h*sum(alt_simp_coef(length(x)) * x)
+
+rHS1 = 0.05
+rD = 0.01
+rS1S2 = 0.12
+rS1D = 0.02
+rS2D = 0.03
+uS1 = 0.95
+uS2 = 0.8
+uD = 0
+uH = 1
+dwS1 = 0.1
+dwS2 = 0.2
+horizon = 60
+r_ann = 0.03
+Delta_t = 1
+r_Delta_t = r_ann * Delta_t #((1 + r_ann)^Delta_t) - 1
+cycles = horizon/Delta_t
+age0 = 20
+s0T = c(1,0,0,0,0)
+ages = (0:cycles)*Delta_t + age0
+```
+
+A state transition diagram is shown in @fig-model1, and key model parameters are summarized in @tbl-model1.
+
+```{r, results = 'asis'}
+#| echo: false
+#| message: false
+#| warning: false
+#| label: tbl-model1
+#| tbl-cap: Model parameters for progressive disease model
+
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+tibble::tribble(
+    ~Parameter,                                          ~Definition, ~Value,
+          "$\\texttt{rD}$",            "Background (cause-deleted) mortality rate", paste0(rD), 
+        "$\\texttt{rHS1}$",           "Rate of progression from Healthy $\\rightarrow$ Sick", paste0(rHS1),
+        "$\\texttt{rS1D}$",   "Cause-specific death rate from Sick health state", paste0(rS1D),
+       "$\\texttt{rS1S2}$",            "Rate of progression from Sick $\\rightarrow$ Sicker", paste0(rS1S2),
+        "$\\texttt{rS2D}$", "Cause-specific death rate from Sicker health state", paste0(rS2D),
+           "$\\mathbf{Q}$",                             "Transition intensity matrix", "" , 
+         
+     "$\\Delta t$",                  "Time step for discrete time model (1=annual, 1/12=monthly, etc.)",  paste0(Delta_t),
+      "$\\mathbf{P}$",                      "Transition probability matrix ", "$e^{\\mathbf{Q}\\Delta t}$",
+    "$\\mathbf{s}_0^{\\top}$", "Initial state occupancy vector", "",
+    "H" , "Time Horizon", paste0(horizon),
+    "N", "Total number of discrete time cycles (i.e., $H/\\Delta t$)", paste0(cycles),
+    "$a_0$", "Age of cohort at beginning of model", paste0(age0),
+          "Ex(a)",                           "Remaining life expectancy at age a", "",
+           "$r$",                                      "Annual discount rate", paste0(r_ann),
+            "$r_{\\Delta t}$", "Cycle discount rate ($r \\Delta_t$)", sprintf("%.2f",r_ann*Delta_t),
+        "$\\texttt{dwS1}$", "Disability weight for Sick health state", paste0(dwS1),
+        "$\\texttt{dwS2}$", "Disability weight for Sicker health state", paste0(dwS2),    
+           "$\\mathbf{d}$", "Disability weight vector (one disability weight for each health state)", "",
+           #"$\\mathbf{u}$", "Utility vector (one utility for each health state)", "",
+    "$\\mathbf{e}(t)$", "Present value of remaining life expectancy at time $t$", ""
+    ) %>% 
+    kable(booktabs = T ,escape = F, align = 'l') %>% 
+    kable_styling()
+```
+
+## Transition Matrices
+
+Transitions among health states are defined in terms of continuous rates ("intensities") and are captured within an intensity matrix $\widetilde{\mathbf{Q}}$:
+
+$$
+\widetilde{\mathbf{Q}}=\begin{pNiceArray}{cccc}[small, baseline=line-3, first-row, first-col] & \smaller \text{Healthy} & \smaller \text{Sick} & \smaller \text{Sicker} & \smaller \text{Dead} \\ \smaller \text{Healthy} & -(\texttt{rHS1}+\texttt{rD}) & \texttt{rHS1} & 0 & \texttt{rD} \\ \smaller \text{Sick} & 0 & -(\texttt{rS1S2} + \texttt{rS1D} +\texttt{rD}) & \texttt{rS1S2} & (\texttt{rS1D} + \texttt{rD}) \\ \smaller \text{Sicker} & 0 & 0 & -(\texttt{rS2D} +\texttt{rD}) & (\texttt{rS2D} +\texttt{rD}) \\ \smaller \text{Dead} & 0 & 0 & 0 & 0 \\ \end{pNiceArray}
+$$
+
+The matrix $\widetilde{\mathbf{Q}}$ has diagonal elements defined as the negative sum of the off-diagonal row values (i.e., the row sums of $\widetilde{\mathbf{Q}}$ are zero). This ensures that the Markov model is "closed"---that is, the total cohort size neither grows nor shrinks over time.
+
+We next embed the continuous transition intensity matrix into a discrete time transition probability matrix by taking the matrix exponential of $\widetilde{\mathbf{Q}}$ for a defined time step (i.e., "cycle length") $\Delta t$:[^3]
+
+[^3]: In Markov theory, $\widetilde{\mathbf{P}}$ is called the "discrete skeleton" of the continuous model [@iosifescu1980]. The conversion formula used to calculate $\widetilde{\mathbf{P}}$ is the matrix analogue to the standard rate-to-probability formula commonly taught in health economics textbooks, i.e., $p = 1 - e^{r\Delta t}$, where $r$ is the rate and $\Delta t$ is the time step (i.e., "cycle length").
+
+$$
+\widetilde{\mathbf{P}}=e^{\widetilde{\mathbf{Q}}\Delta t}=\begin{pNiceArray}{cccc}[baseline=line-3, first-row, first-col] \CodeBefore \rectanglecolor{black!15}{5-5}{5-5} \Body & \smaller \text{Healthy} & \smaller \text{Sick} & \smaller \text{Sicker} & \smaller \text{Dead}  \\ \smaller \text{Healthy} & \texttt{pHH} & \texttt{pHS1} & \texttt{pHS2} & \texttt{pHD}  \\ \smaller \text{Sick} & 0 & \texttt{pS1S1} & \texttt{pS1S2}& \texttt{pS1D}  \\ \smaller \text{Sicker} & 0 & 0 & \texttt{pS2S2} & \texttt{pS2D}  \\ \smaller \text{Dead} & 0 & 0 & 0 & 1   \end{pNiceArray}
+$$
+
+Embedding the transition probability matrix using the matrix exponential ensures that the resulting transition probabilities capture the underlying continuous time disease process. In particular, $\widetilde{\mathbf{P}}$ will capture the probability of compound ("jumpover") transitions within a single cycle. For example, in the continuous time rate matrix $\widetilde{\mathbf{Q}}$ above, there is a zero-valued rate defined for progressions from Healthy to Sicker, since individuals must first enter the Sick state before they can advance to the Sicker state. However, after embedding using the matrix exponential of $\widetilde{\mathbf{Q}}$, the matrix $\widetilde{\mathbf{P}}$ has a non-zero cycle transition probability from Healthy To Sicker (i.e., $\texttt{pHS2}$). This value captures the probability of a compound or "jumpover" transition from Healthy $\rightarrow$ Sick $\rightarrow$ Sicker within the same discrete time cycle; see @graves2021 for further discussion, and @iosifescu1980 for additional theory.
+
+As we will show below, the transition probability matrix $\widetilde{\mathbf{P}}$ can be combined with an initial state occpuancy vector $\mathbf{s}'_0$ to construct a Markov trace to calculate health (and cost) outcomes. The matrix $\widetilde{\mathbf{P}}$ is not well-suited to calculate DALY outcomes, however. A primary reason is that the death transition probabilities reflect transitions due to all causes of death. Accumulated person-time in the absorbing death state will therefore reflect time spent in the death state due to the disease *or* due to other background causes.[^4]
+
+[^4]: To highlight how this is problematic, assume for now that the disease affects quality of life but not death. That is, assume $\texttt{rS1}=0$ and $\texttt{rS2}=0$. In each cycle, there will be some number of deaths due to background mortality causes in the cohort. When calculating YLL outcomes, we compare the age at which these deaths occur to a reference life table that tells us the remaining life expectancy for those who died. These remaining life expectancy values are accumulated and averaged across the cohort to yield an estimate of the YLL for the disease. This YLL value would be non-zero if we were to use $\widetilde{\mathbf{P}}$ as the underlying basis for our calculations---even though in this hypothetical the disease does not affect death.
+
+<!-- we will demonstrate this process in the section below. For QALY health outcomes, we further define a state occpuancy payoff vector using utility payoffs defined for each health state. Similarly, payoffs based on disability weights can be defined to calculate YLDs.  -->
+
+To calculate DALYs, two options are available. First, practitioners may simply define separate absorbing states for death due to the disease vs. death from non-disease causes. The resulting Markov trace can then be used to calculate the number of new disease-related deaths in each cycle; this is done by taking the difference in total deaths due to disease between adjacent cycles. As we will show below, these death totals can then be combined with remaining life expectancy at each age to calculate YLLs.
+
+A second, more comprehensive, option is to augment the transition intensity matrix $\widetilde{\mathbf{Q}}$ with non-Markovian "tracking" states. Tracking states allow for a Markovian submatrix that remains closed, but facilitate bookkeeping for cost and health outcomes through the addition of rows and columns on the outer "edges" of $\widetilde{\mathbf{Q}}$.[^5]
+
+[^5]: Tracking states also allow for accurate bookeeping for other outcomes such as costs. For example, if developing the disease incurs a one-time diagnosis or treatment cost, the compound transitions implied by the embedded transition probability matrix imply that some individuals will transiently enter (and then exit) the Sick state in a single cycle. When calculating costs, practitioners may want to include a tracking state for the Sick state to be sure to capture these one-time costs, which would be masked if cost payoffs are simply multiplied by state occupancy at the end of each cycle (e.g., costs for individuals with a sojourn through the Sick state in a single cycle would not be accounted for).
+
+In general, tracking states can either count the total number of transitions that have occurred up to a given cycle (i.e., an "accumulator" state), or can track the total number of new transitions that occur within a single cycle (i.e., a "transition" state).[^6] As we will demonstrate below, the addition of a tracking state that records the number of new deaths due to the disease in each cycle can be added to calculate YLLs based on remaining life expectancy of those deaths from life table data.
+
+[^6]: More generally, accumulator and transition states can be defined for any number of transition types, as they are useful for capturing one-time costs in the model, or for for calculating other decision-relevant outcomes such as the total number of people who developed the disease or died from the disease as secondary outcomes.
+
+To augment the transition probability matrix with a tracking state for disease-related deaths, we add a transition state row and column to the intensity matrix. This transition state, called $\texttt{trDeadDisease}$, is included in the intensity matrix $\mathbf{Q}$ below:
+
+$$
+\mathbf{Q}=\begin{pNiceArray}{cccc:c}[small, baseline=line-3, first-row, first-col] & \smaller \text{Healthy} & \smaller \text{Sick} & \smaller \text{Sicker} & \smaller \text{Dead} & \smaller \text{trDeadDisease} \\ \smaller \text{Healthy} & -(\texttt{rHS1}+\texttt{rD}) & \texttt{rHS1} & 0 & \texttt{rD} & 0 \\ \smaller \text{Sick} & 0 & -(\texttt{rS1S2} + \texttt{rS1D} +\texttt{rD}) & \texttt{rS1S2} & (\texttt{rS1D} + \texttt{rD}) & \texttt{rS1D} \\ \smaller \text{Sicker} & 0 & 0 & -(\texttt{rS2D} +\texttt{rD}) & (\texttt{rS2D} +\texttt{rD}) & \texttt{rS2D} \\ \smaller \text{Dead} & 0 & 0 & 0 & 0 & 0 \\ \hdottedline \smaller \text{trDeadDisease} & 0 & 0 & 0 & 0 & 0 \end{pNiceArray}
+$$
+
+Two aspects of $\mathbf{Q}$ are worth highlighting. First, two transition intensities---from the Sick and Sicker states to Death (i.e., $\texttt{rS1D}$ and $\texttt{rS2D}$)---appear in the tracking column. This ensures that $\texttt{trDeadDisease}$ will track all relevant transitions to death due to the disease.
+
+Second, $\mathbf{Q}$ is divided into a Markovian submatrix (the original $\widetilde{\mathbf{Q}}$ matrix) and the non-Markovian tracking row and column. This division is made apparent using dotted vertical and horizontal lines. Critically, the Markovian submatrix remains closed---that is, the diagonal elements remain unchanged so that the row sums of the submatrix remain zero, even after the addition of the tracking column along the "edges" of $\mathbf{Q}$. This ensures that the Markovian submatrix can be used to calculate state occupancy for a closed cohort that neither gains nor loses cohort members over the modeled time horizon.
+
+As above, we obtain the transition probability matrix by embedding $\mathbf{Q}$ into the discrete time step:
+
+$$
+\widehat{\mathbf{P}} = e^{\mathbf{Q}\Delta t}
+$$ {#eq-embed}
+
+After calculating the exponential of $\mathbf{Q}$ for the defined cycle length, the resulting transition probability matrix $\widehat{\mathbf{P}}$ treats $\texttt{trDeadDisease}$ as an absorbing state (i.e., individuals are retained in the $\texttt{trDeadDisease}$ with probability one). Using the terminology introduced above, this absorbing state could serve as an **accumulator** state that (in the constructed Markov trace) records the total number of people who have died from the disease up to any given cycle. This may be a decision-relevant health outcome to consider on its own; indeed, so long as the Markovian submatrix remains closed, there is no limit to the number of accumulator and/or transition states one might add along the "edges" of a model.
+
+To change $\texttt{trDeadDisease}$ to a **transition** state, we simply replace the absorbing probability of one in the cell $[\texttt{trDeadDisease},\texttt{trDeadDisese}]$ with a zero. We will call the resulting transition probability matrix $\mathbf{P}$. This cell-level change is highlighted in grey in the bottom right cell of $\mathbf{P}$ below:
+
+$$
+\mathbf{P}=\begin{pNiceArray}{cccc:c}[baseline=line-3, first-row, first-col] \CodeBefore \rectanglecolor{black!15}{5-5}{5-5} \Body & \smaller \text{Healthy} & \smaller \text{Sick} & \smaller \text{Sicker} & \smaller \text{Dead} & \smaller \text{trDeadDisease} \\ \smaller \text{Healthy} & \texttt{pHH} & \texttt{pHS1} & \texttt{pHS2} & \texttt{pHD}^{(allcause)} & \texttt{pHD}^{(disease)} \\ \smaller \text{Sick} & 0 & \texttt{pS1S1} & \texttt{pS1S2}& \texttt{pS1D}^{(all cause)} & \texttt{pS1D}^{(disease)} \\ \smaller \text{Sicker} & 0 & 0 & \texttt{pS2S2} & \texttt{pS2D}^{(allcause)} & \texttt{pS2D}^{(disease)} \\ \smaller \text{Dead} & 0 & 0 & 0 & 1 & 0 \\ \hdottedline \smaller \text{trDeadDisease} & 0 & 0 & 0 & 0 & 0 \end{pNiceArray}
+$$
+
+<!-- One final observation about the transition probability matrix is worth noting. By embedding the transition intensity matrix into the discrete time step ($\Delta t$) through matrix exponentiation, the resulting transition probability matrix contains non-zero probabilities for seemingly implausible transitions. For example, $\texttt{pHS2}$ captures the probability of transition from "Healthy" to "Sicker" within a cycle---a seemingly impossible transition since individuals must first transition into the "Sick" state before they can transition to "Sicker." The reason for this is the embedded transition matrix captures compound or "jumpover" transitions---that is, transitions to and from more than one health state within a single cycle. In a multi-state model with more than two states (i.e., when there are competing risks), matrix exponentiation of the intensity matrix is necessary to produce the correct transition probabilities; cell-wise application of common conversion formulas (e.g., $p = 1-e^{rt}$) will in general not be correct, and will result in a discrete time Markov model that does not represent the underlying continuous time process because the resulting probability matrix rules out compound transitions within a cycle (see @graves2021 for further discussion). -->
+
+## Calculating YLD, YLL and DALY Outcomes
+
+With the augmented transition probability matrix $\mathbf{P}$ defined, we next turn our attention to calculating YLD and YLL health outcomes, respectively. Calculation of DALY outcomes follows trivially from there, since DALYs are simply the sum of YLD and YLL values. We first begin, however, with a discussion of the role of discrete time and discounting in estimating these outcomes.
+
+### The Role of Time and Time Discounting
+
+Though later GBD iterations removed age and time discounting for the purposes of documenting disease burdens worldwide, the World Health Organization's Choosing Interventions that are Cost-Effective (WHO-CHOICE) program recommends consideration of time discounting of health outcomes [@murray2020; @bertram2021]. We therefore adopt the WHO-CHOICE recommendation and include time discounting in our DALY approach.[^7]
+
+[^7]: Practitioners who do not wish to discount DALY outcomes can simply set the annual discount rate $r$ to zero.
+
+Our discounting approach has one notable---though small in magnitude and impact---change to usual practice. DALY formulas calculate the present value of a stream of future health that accrues over the remaining life (YLDs; @eq-yld), and over the remaining life expectancy (YLLs; @eq-yll) of individuals in the population of interest. Specifically, the GBD formulas employ continuous time discounting based on a discount factor of $e^{-rt}$, where $r$ is the annualized discount rate. For example, at time $t=10$ and using $r=0.03$, the continuous time discount factor is $e^{-0.03*10} = 0.74082$. By comparison, Markov cohort models frequently employ discrete time discounting based on $\frac{1}{(1+r)^t}$. Using the values above, this results in a discrete time discount factor of $(1/1.03^{10})=0.74409$.
+
+The use of a discrete time discounting approach stems, in part, from the conceptualization of outcomes that occur at specific times (e.g., costs associated with diagnosis, treatment, or adverse events associated with a disease). To maintain consistency with DALY formulas, we will adopt the GBD approach and discount YLD and YLL outcomes using a continuous time approach.
+
+How does this play out in practice? First, following @eq-yld, YLDs accrued in a given cycle $t$ are multiplied by a continuous time discount factor $\frac{1}{r_{\Delta_t}}(1-e^{-r_{\Delta_t}})$, where $r_{\Delta_t}$ is the cycle discount rate, i.e., $r_{\Delta_t}=r\Delta_t$.[^8] This minor adjustment reflects a conceptualization of disabilty-weighted health that accrues througout the cycle, not at some discrete time point in the cycle. For example, with an annual cycle length and $r=0.03$, this within-cycle adjustment factor is 0.985; with a monthly cycle length and the same annual discount rate, the within-cycle adjustment factor is 0.9988.
+
+[^8]: This formula uses a cycle discount rate, which ensures that the model appropriately discounts at the annual level for cases when the cycle length is greater than or less than one year. For example, for a model with a monthly cycle length ($\Delta_t=1/12$) and annual discount rate ($r$) of 0.03, the cycle discount rate is `r 0.03*1/12`.
+
+Similarly, the YLL payoff for disease-related deaths in cycle $t$ is based on the present value of remaining life expectancy at time $t$. We convert remaining life expectancy to the present value at time $t$ using the GBD's continuous time discounting approach (i.e., @eq-yll).
+
+Finally, both of the above discounting adjustments calculate the present value of YLD and YLL outcomes at some (future) time $t$. To express these quantities as the present value at $t=0$, we apply additional discounting based on a continuous time discount factor. This differs from usual practice only in terms of the discounting factor used ($e^{-r_{\Delta_t}t}$ rather than $\frac{1}{(1+r_{\Delta_t})^t}$). In practice, differences between the two approaches are small in magnitude, and will often be inconsequential for the incremental comparisons across strategies used to calculate cost-per-DALY-averted outcomes.
+
+@fig-discounting summarizes our discounting approach using an example drawn from @rushby2001. In this example, a hypothetical patient develops bipolar disorder (disability weight = 0.6) at age 35 and dies prematurely on her 45th birthday. Remaining life expectancy at age 45 (34.73 years) is based on a life table for Chilean females with a life expectancy at birth of 75 years. We deviate slightly from the example in @rushby2001 and assume that we track this hypothetical patient in a model that begins at age 0, rather than starting at age 35.
+
+The top panel (A) of @fig-discounting highlights how YLD and YLL outcomes are calculated in continuous time. The patient spends $L=10$ years in the diseased state, which results in a YLD value at age 35 of $YLD(35)=0.6*\big ( \frac{1}{.03}(1-e^{-.03 * 10})\big )$ = `r round(0.6*((1/.03)*(1-exp(-.03*10))) ,3)`; this value is equivalent to the example (without age weighting) in @rushby2001. Similarly, the present value of YLL at age 45 is $YLL(45)=(1/.03)(1-e^{-.03*34.73})$ = `r round((1/.03)*(1-exp(-.03*34.73)),3)`. We then discount each of these values back further to $t=0$ to obtain $YLD_{t=0}=YLD(35) \times e^{-.03*35} =$ `r round((0.6*((1/.03)*(1-exp(-.03*10))))*exp(-.03*35),3)` and $YLL_{t=0} = YLL(45) \times e^{0.03*45}=$ `r round(((1/.03)*(1-exp(-.03*34.73)))*exp(-.03*45),3)`.
+
+By contrast, Panel B demonstrates how YLL and YLD outcomes are calculated in discrete time. The YLD accrued in a single cycle is calculated as $YLD_{\Delta_t}(t) = D \left ( \frac{1}{r_{\Delta t}}\left(1-e^{-r_{\Delta t} }\right) \right ) \Delta_t$. Again, the term $\frac{1}{r_{\Delta t}}\left(1-e^{-r_{\Delta t} }\right)$ is included to "smooth out" the disability weight $D$ througout the cycle.[^9] This value is then discounted furhter to $t=0$ by applying a continuous time discount factor: $YLD_{t=0}(t) = YLD_{\Delta_t}(t) \times e^{-(\Delta_t r t)}$.
+
+[^9]: The term $\Delta_t$ is included to rescale the outcome to reflect years with disability, in the event a non-annual cycle length is used (i.e., $\Delta_t \neq 1$).
+
+<!-- - DALY formula calculates the present value of a stream of future health outcomes (YLDs and YLLs) that occur over the remaining life (YLDs) and life expectancy (YLLs) of the individual. -->
+
+<!-- - When discounting is employed, the GBD formula uses continuous time discounting to calculate the present value of this stream of future health. -->
+
+<!-- - CEAs, by comparison, often use a discrete time discounting formula to calculate the present value of outcomes that occur at discrete times and intervals (e.g., incurring a treatment cost or teh initiatiation of a disease).  -->
+
+<!-- - Depending on the cycle length of the model, these events may not be measured on the scale of years. For example, a model with a monthly cycle length would measure outcomes on the scale of months. -->
+
+<!-- - To remain consistent with the DALY formulas, we adopt a continuous time discounting formula to calculate the present value of discrete outcomes that occur within the time horizon.  -->
+
+<!-- - In practice this does not amount to a significant difference in the present value of the outcomes. -->
+
+<!-- - It is also worth noting that because of this, we apply a minor discounting adjustment to the "flow" of YLDs that accrue during a single cycle.  -->
+
+<!-- $$ -->
+
+<!-- \frac{1}{r_{\Delta_t}}(1-e^{-r_{\Delta_t}}) -->
+
+<!-- $$ -->
+
+<!-- For example, using $r_ann=0.03$ and an annual cycle length, this adjustment factor is 0.985. This is a very small adjustment, but it is necessary to ensure that the present value of the YLDs that accrue during a single cycle is consistent with the present value of the YLDs that accrue over the remaining life expectancy of the individual (i.e., YLDs do not accrue at discrete points in time, but are rather a "flow" of disability-weighted health that accrues continuously over time). -->
+
+<!-- - To remain consistent, we also apply a discounting  -->
+
+![Discounting in Continuous vs. Discrete Time](discounting-figure.png){#fig-discounting}
+
+### Years Lost Due to Disability (YLD)
+
+Define $\mathbf{s}_0$ as the initial state occupancy vector at time $t=0$. This vector summarizes the number or fraction of the population in each health state at the beginning of the model. Often, this vector will be set such that the entire cohort starts off healthy---though this need not always be the case.
+
+Health state occupancy at cycle $t$ is defined as the total number or fraction of the cohort in each health state at that time. State occupancy at cycle $t$ is calculated as:
+
+$$
+\mathbf{s}'_t=\mathbf{s}'_0 \mathbf{P}^t
+$$ {#eq-stocc-yld}
+
+To calculate YLDs in a given cycle $t$, we multiply state occupancy $\mathbf{s}'_t$ by a disability weight payoff vector $\mathbf{d}$,
+
+<!-- TO DO TK: CHECK THAT THE DISCOUNT RATE HERE IS CORRECT!! -->
+
+$$
+\mathbf{d}=\left[\begin{array}{c}
+0 \\
+\texttt{dwS1} \frac{1}{r_{\Delta_t}}(1-e^{-r_{\Delta_t}}) \Delta_t\\
+\texttt{dwS2} \frac{1}{r_{\Delta_t}}(1-e^{-r_{\Delta_t}}) \Delta_t\\
+0 \\
+0 
+\end{array}\right]
+$$ where $\texttt{dwS1}$ and $\texttt{dwS2}$ are the disability weights for the Sick and Sicker states, respectively.
+
+Discounted years of life lost to disability (YLD) at cycle $t$ is given by
+
+$$
+YLD(t)=\mathbf{s}'_t \mathbf{d}  \times{e^{-r\Delta_t t}}=\mathbf{s}'_0 \mathbf{P}^t \mathbf{d}  \times{e^{-r\Delta_t t}}
+$$ {#eq-yldt}
+
+and the cumulative total discounted YLD at the end of the time horizon is calculated as
+
+$$
+YLD=\sum_{t=0}^{N-1} YLD(t)=\sum_{t=0}^{N-1}\left(\mathbf{s}'_0 \mathbf{P}^t \mathbf{d}  \times{e^{-r\Delta_t t}}\right)
+$$ {#eq-yldcum}
+
+Note that the summation in @eq-yldcum is from 0 to $N-1$; this assumes that all health state transitions occur at the end of each cycle. If we were to instead assume transitions occur at the beginning of the cycle, we would set the summation from 1 to $N$. In practice, we also apply a cycle correction (e.g., a half-cycle correction or cycle adjustment weights based on Simpson's rule or some other method) to further "smooth out" summation of outcomes in discrete time [@jahn2019; @srivastava2020]; we demonstrate an approach using a version of Simpson's rule in our application below.
+
+### Years of Life Lost (YLL)
+
+As noted above and in @eq-yll, YLLs are based on the present value of remaining life expectancy among deaths that occur in each cycle $t$. Define $a(t)$ as the age of the cohort at cycle $t$, i.e., $a(t) = t \cdot \Delta t + a0$, where $a_0$ is the age of the cohort at $t=0$. Define $e(t)=e(a(t))$ as the present value of remaining life expectancy at cycle $t$. Following the GBD continuous time discounting approach, $e(a(t))$ is given by
+
+$$
+e(a(t)) = \frac{1}{r}\big (1 - e^{-rEx(a(t))} \big )
+$$ {#eq-pvEx}
+
+where $Ex(a)$ is the remaining life expectancy at age $a$. $Ex(a)$ is drawn from either an exogenous or an endogenous life table, depending on the objectives of the modeling exercise [@anand2019].
+
+We next define a remaining life expectancy payoff vector at cycle $t$:
+
+$$
+\mathbf{e}(t)=\left[\begin{array}{c}
+0   \\
+0   \\
+0   \\
+0   \\
+\frac{1}{r}\big (1 - e^{-rEx(a(t))} \big )
+\end{array}\right]
+$$
+
+This payoff vector reflects discounting, but only in terms of the present value of remaining life expectancy *at time* $t$.
+
+$$
+YLL(t)=\mathbf{s}'_t \mathbf{e}(t)  \times{e^{-r\Delta_t t}} =\mathbf{s}'_0 \mathbf{P}^t \mathbf{e}(t)  \times{e^{-r\Delta_t t}}
+$$ {#eq-yllt}
+
+Total discounted YLLs at time $t=0$ is given by:
+
+$$
+YLL=\sum_{t=0}^{N-1} YLL(t) =\sum_{t=0}^{N-1}\left(\mathbf{s}'_0 \mathbf{P}^t \mathbf{e}(t)  \times{e^{-r\Delta_t t}} \right) 
+$$ {#eq-yllcum}
+
+### Disability Adjusted Life Years
+
+Total discounted DALYs at cycle $t$ is the sum of YLDs and YLLs:
+
+$$
+DALY = YLD + YLL = \sum_{t=0}^{N-1}\left(\mathbf{s}'_0 \mathbf{P}^t \mathbf{d}  \times{e^{-r\Delta_t t}}\right) + \sum_{t=0}^{N-1}\left(\mathbf{s}'_0 \mathbf{P}^t \mathbf{e}(t) \times{e^{-r\Delta_t t}}\right)
+$$ {#eq-dalycum1}
+
+Alternatively, we can jointly calculate DALYs by defining a single payoff vector $\mathbf{y}(t)$:
+
+$$
+\mathbf{y}(t)=\left[\begin{array}{c}
+0   \\
+\texttt{dwS1} \frac{1}{r_{\Delta_t}}(1-e^{-r_{\Delta_t}}) \Delta_t\\
+\texttt{dwS2} \frac{1}{r_{\Delta_t}}(1-e^{-r_{\Delta_t}}) \Delta_t \\
+0   \\
+\frac{1}{r}\big (1 - e^{-rEx(a(t))} \big )
+\end{array}\right]
+$$ Discounted DALYs at cycle $t$ is then given by
+
+$$
+DALY(t)=\mathbf{s}'_t \mathbf{y}(t)\times{e^{-r\Delta_t t}}  =\mathbf{s}'_0 \mathbf{P}^t \mathbf{y}(t) \times{e^{-r\Delta_t t}}
+$$ {#eq-dalyt}
+
+And the cumulative total discounted DALYs is
+
+$$
+DALY=\sum_{t=0}^{N-1} DALY(t)=\sum_{t=0}^{N-1}\left(\mathbf{s}'_0 \mathbf{P}^t \mathbf{y}(t) \times{e^{-r\Delta_t t}}\right)
+$$ {#eq-dalycum}
+
+## Example: Sick-Sicker Model
+
+Using the framework outlined above, we next execute the Sick-Sicker model for DALY outcomes using the parameter values summarized in @tbl-model1.
+
+```{r, echo = FALSE, warning = FALSE, message=FALSE}
+Q <- 
+    matrix(c(
+        -(rHS1 + rD), rHS1, 0, rD, 0 ,
+        0, -(rS1S2 + rS1D + rD), rS1S2, (rS1D + rD), rS1D,
+        0, 0, -(rS2D + rD), (rS2D + rD), rS2D,
+        0,0,0,0,0,
+        0,0,0,0,0),
+        nrow = 5, 
+        ncol = 5,
+        byrow=TRUE, 
+        dimnames = list(c("Healthy","Sick","Sicker","Dead","trSickDead"),
+                        c("Healthy","Sick","Sicker","Dead","trSickDead")
+        ))
+P = expm(Q * Delta_t)
+P["trSickDead","trSickDead"] = 0
+Pr = round(P,4)
+
+```
+
+The transition intensity matrix is given by:
+
+$$
+\mathbf{Q}=\begin{pNiceArray}{cccc:c}[small, baseline=line-3, first-row, first-col] & \smaller \text{Healthy} & \smaller \text{Sick} & \smaller \text{Sicker} & \smaller \text{Dead} & \smaller \text{trDeadDisease} \\ \smaller \text{Healthy} & `r Q[1,1]` & `r Q[1,2]` & `r Q[1,3]` & `r Q[1,4]` & `r Q[1,5]` \\ \smaller \text{Sick} & `r Q[2,1]` & `r Q[2,2]` & `r Q[2,3]` & `r Q[2,4]` & `r Q[2,5]` \\ \smaller \text{Sicker} & `r Q[3,1]` & `r Q[3,2]` & `r Q[3,3]` & `r Q[3,4]` & `r Q[3,5]` \\ \smaller \text{Dead} & `r Q[4,1]` & `r Q[4,2]` & `r Q[4,3]` & `r Q[4,4]` & `r Q[4,5]` \\ \hdottedline \smaller \text{trDeadDisease} & `r Q[5,1]` & `r Q[5,2]` & `r Q[5,3]` & `r Q[5,4]` & `r Q[5,5]` \end{pNiceArray}
+$$
+
+We next calcualte the matrix exponential (i.e., @eq-embed) and make the cell-level modification to turn $\texttt{trDeadDisease}$ into a transition state. After doing so, we obtain the following transition probability matrix for the defined (annual) time step:
+
+$$
+\mathbf{P}=\begin{pNiceArray}{cccc:c}[small, baseline=line-3, first-row, first-col] & \smaller \text{Healthy} & \smaller \text{Sick} & \smaller \text{Sicker} & \smaller \text{Dead} & \smaller \text{trDeadDisease} \\ \smaller \text{Healthy} & `r Pr[1,1]` & `r Pr[1,2]` & `r Pr[1,3]` & `r Pr[1,4]` & `r Pr[1,5]` \\ \smaller \text{Sick} & `r Pr[2,1]` & `r Pr[2,2]` & `r Pr[2,3]` & `r Pr[2,4]` & `r Pr[2,5]` \\ \smaller \text{Sicker} & `r Pr[3,1]` & `r Pr[3,2]` & `r Pr[3,3]` & `r Pr[3,4]` & `r Pr[3,5]` \\ \smaller \text{Dead} & `r Pr[4,1]` & `r Pr[4,2]` & `r Pr[4,3]` & `r Pr[4,4]` & `r Pr[4,5]` \\ \hdottedline \smaller \text{trDeadDisease} & `r Pr[5,1]` & `r Pr[5,2]` & `r Pr[5,3]` & `r Pr[5,4]` & `r Pr[5,5]` \end{pNiceArray}
+$$
+
+The YLD payoff vector is defined as
+
+$$
+\mathbf{d}=
+\left[\begin{array}{c}
+0 \\
+0.1 \frac{1}{0.03}(1-e^{-0.03}) \cdot 1\\
+0.2 \frac{1}{0.03}(1-e^{-0.03}) \cdot 1\\
+0 \\
+0 
+\end{array}\right]=
+\left[\begin{array}{c}
+0 \\
+0.09851 \\
+0.19702\\
+0 \\
+0 
+\end{array}\right]
+$$
+
+YLL payoff vectors are then defined for each corresponding age at cycle $t$ based on an initial cohort starting age of `r age0` and remaining life expectancy from the GBD reference life table [@globalburdenofdiseasecollaborativenetwork2021].
+
+For example, for an initial cohort of 20 year olds, the payoff vector for YLLs after 10 annual cycles (i.e., $\mathbf{e}(10)$) is based on the present value (at $t=10$) of remaining life expectancy at age 30, and is defined as
+
+$$
+\mathbf{e}(10)=\left[\begin{array}{c}
+0   \\
+0   \\
+0   \\
+0   \\
+\frac{1}{.03}\big (1 - e^{-.03 * 59.196} \big )  
+\end{array}\right] = 
+\left[\begin{array}{c}
+0   \\
+0   \\
+0   \\
+0   \\
+27.688
+\end{array}\right]
+$$ where $Ex(a(10)=30) =$ `r round(fExR(30),3)`.
+
+```{r, echo = FALSE}
+# Confirm its the same as the markov trace-based version
+trace = 
+    0:(cycles-1) %>% 
+    map_df(~({
+        as.data.frame(s0T %*% (P %^% .x))
+    })) %>% 
+    as.matrix()
+
+disc = 
+  exp(-r_Delta_t * 0:(cycles-1))
+
+d_ = matrix(c(0,
+              dwS1 * Delta_t * (1/r_Delta_t) * (1 - exp(-r_Delta_t)) ,
+              dwS2  * Delta_t * (1/r_Delta_t) * (1 - exp(-r_Delta_t)),
+              0,
+              0),
+            dimnames = list(c(
+                "Healthy", "Sick", "Sicker", "DeadBG", "SickDead"
+            ), c("DW")))
+
+d = d_
+
+YLD_t = 0:(cycles-1) %>% 
+    map_dbl(~({
+        (s0T %*% (P %^% .x) %*% d) * exp(-r_Delta_t * .x)
+    }))
+
+
+Ex <- matrix(0,nrow = 5, ncol = cycles+1)
+rownames(Ex) = rownames(Q)
+colnames(Ex) = ages
+Ex["trSickDead",] = (1/r_ann) * (1 - exp(-r_ann * fExR(ages)))
+
+```
+
+```{r, echo = FALSE}
+
+alt_simp_coef <- function(i) c(17, 59, 43, 49, rep(48, i-8), 49, 43, 59, 17) / 48
+alt_simp      <- function(x,h) h*sum(alt_simp_coef(length(x)) * x)
+
+fmlas <- 
+    tibble(cycle = "t",
+           at = "a(t)",
+           Healthy = "Healthy",
+           Sick = "Sick",
+           Sicker = "Sicker",
+           Dead = "Dead",
+           trSickDead = "trSickDead",
+          et = "e(t)",
+          cycle_adj = "Cycle Adj.",
+           YLDt = "YLD(t)",
+           YLLt = "YLL(t)",
+           DALYt = "DALY(t)")
+
+trace_final <- 
+    trace %>% 
+    as.data.frame() %>%
+    mutate(et = as.vector(Ex["trSickDead",-nrow(Ex)])) %>% 
+    mutate(cycle_adj = alt_simp_coef(cycles)) %>% 
+    mutate(YLDt = unname(trace %*% d * disc)) %>% 
+    mutate(YLLt = disc * trace[,"trSickDead"] * Ex["trSickDead",-ncol(Ex)]) %>% 
+    mutate(DALYt = YLDt + YLLt) %>% 
+    mutate(at = (row_number()-1)*Delta_t+age0) %>% 
+    dplyr::select(at,everything())
+
+dots <- 
+    tibble(
+           at = "...",
+           Healthy = "...",
+           Sick = "...",
+           Sicker = "...",
+           Dead = "...",
+           trSickDead = "...",
+           et = "...",
+           cycle_adj = "...",
+           YLDt = "...",
+
+           YLLt = "...",
+           DALYt = "...")
+
+
+
+
+```
+
+```{r}
+#| echo: false
+DALYcum <- trace_final %>%
+            summarise_at(vars(YLDt, YLLt, DALYt), ~alt_simp(.,h=1)) %>%
+            mutate_all(function(x)
+                sprintf("%.3f", round(x, 4))) %>% 
+            mutate(total = "Total")
+```
+
+Our next steps is to use @eq-stocc-yld to calculate health state occupancy in each cycle in a Markov trace defined over a `r horizon` year horizon. This Markov trace is shown in columns 3-6 in @tbl-trace.
+
+The remaining columns in @tbl-trace provide information on the cycle ($t$), cohort age in each cycle ($a(t)$), remaining life expectancy at each age ($e(t)$), and cycle adjustment factors based on Simpson's rule ($\text{Cycle Adj.}$) [@jahn2019]. The final three columns provide cycle-specific YLD, YLL and DALY outcome calculations based on @eq-yll, @eq-yld, and @eq-dalyt, respectively. Total YLD, YLL, and DALYs are shown in the bottom row, and are calculated based on @eq-yllcum, @eq-yldcum, and @eq-dalycum.[^10] Total DALYs (`r as.numeric(DALYcum$DALYt)` years) are primarily driven by YLLs (`r as.numeric(DALYcum$YLLt)` years) due to the high mortality rate of the disease.
+
+[^10]: Before summation, we multiply each of the YLD(t), YLL(t) and DALY(t) by the cycle adjustment factor ("Cycle Adj.") based on Simpson's rule to account for the fact that the Markov trace is a discrete approximation of the continuous Markov process.
+
+```{r, results = 'asis'}
+#| echo: false
+#| label: tbl-trace
+#| tbl-cap: Markov Trace and DALYs 
+#| message: false
+#| warning: false
+ 
+options(knitr.kable.NA = '')
+bind_rows(
+    trace_final %>% 
+        mutate_all(function(x)
+            sprintf("%.3f", round(x, 4))) %>%
+        mutate(at = sprintf("%.0f",as.numeric(at))) %>% 
+        rownames_to_column(var = "cycle") %>% 
+        mutate(cycle = paste0(as.numeric(cycle)-1)) %>% 
+        head(n = 5),
+    dots,
+    trace_final %>% 
+        mutate_all(function(x)
+            sprintf("%.3f", round(x, 4))) %>%
+        mutate(at = sprintf("%.0f",as.numeric(at))) %>% 
+        rownames_to_column(var = "cycle") %>% 
+        mutate(cycle = paste0(as.numeric(cycle)-1)) %>% 
+        tail(n = 5)
+) %>%
+    mutate(total = "") %>%
+    dplyr::select(total, everything()) %>%
+    bind_rows({
+        trace_final %>%
+            summarise_at(vars(YLDt, YLLt, DALYt), ~alt_simp(.,h=1)) %>%
+            mutate_all(function(x)
+                sprintf("%.3f", round(x, 4))) %>% 
+            mutate(total = "Total")
+    }) %>%
+    kable(booktabs=T, escape = F, col.names= c("",fmlas)) %>% 
+    kable_styling(font_size = 8,position = 'center',latex_options = 'HOLD_position') 
+    
+    #add_footnote(c("(ref:test)","two"),notation="symbol")
+
+rstar = log(1/(1+r_ann))
+Qstar = Q + rstar*diag(nrow(Q))
+#((s0T %*% (expm(Qstar * horizon) - diag(nrow(Q))) %*% ginv(Qstar) %*% d_)) 
+
+
+```
+
+<!-- $\tilde \mathbf{P}=\begin{pNiceArray}{ccc:c}[ baseline=line-3, first-row, first-col] -->
+
+<!-- & \smaller Healthy &  \smaller CVD &  \smaller Dead &  \smaller trDeadCVD \\ -->
+
+<!--  \smaller Healthy & 1 - p_{CVD} - p_{D} & p_{CVD} & p_{D} & p_{H.D.CVD} \\ -->
+
+<!--  \smaller CVD & 0  & 1 - p_{D} - p_{D.CVD}  & p_{D} + p_{D.CVD} & p_{D.CVD} \\ -->
+
+<!--  \smaller Dead & 0 & 0 & 1 & 0 \\ -->
+
+<!-- \hdottedline -->
+
+<!--  \smaller trDeadCVD & 0 & 0 & 0 & \underline{0} -->
+
+<!-- \end{pNiceArray}$ -->
+
+<!-- $R=\begin{pNiceMatrix} -->
+
+<!-- H & CVD & D & trD.CVD \\ -->
+
+<!-- 0 & 0 & 0 & 0 -->
+
+<!-- \end{pNiceMatrix} -->
+
+## Extension to Microsimulation and Discrete Event Simulation
+
+This section demonstrates how our DALY modeling framework extends to microsimulation and discrete event simulation---two alternative, widely used modeling frameworks with broad applications in decision analysis and health technology assessment.[^11]
+
+[^11]: While it is beyond the scope of this study to discuss the features and tradeoffs of these approaches over discrete time Markov cohort models, a useful comparison of approaches can be found in @graves2021.
+
+### Microsimulation
+
+Microsimulation models simulate individual patient trajectories that, unlike Markov cohort models, rely on health state transition probabilities that may depend on patient history in the model. Microsimulation generally follows a four-step process for simulating these trajectories [@krijkamp2018a]:
+
+1.  Each simulated patient $(i)$ is assigned an initial health state $s_i(0)$. Based on this health state, intial costs and health outcomes are assigned for the first cycle.
+
+2.  The individual's probability of transition to a different health state in the next cycle is calculated. These probabilities may be a function of the individual's characteristics or their history in the model.
+
+3.  Based on the probabilities determined in step 2, the patient is assigned a new health state $s_i(t)$ for the next cycle by sampling from a multinomial distribution. Health outcomes and costs are assigned for the cycle based on the new health state.
+
+4.  Steps 2 and 3 are repeated for each cycle until death or the end of the modeling time horizon. Health state occupancy is recorded for each cycle, and cost and health outcome payoffs are assigned and accumulated.
+
+Our framework extends to microsimulation models by applying the YLD and YLL formulas to each patient cycle, with discounting and cycle adjustments applied as needed. Specifically, cycle-specific health outcomes for a given simulated patient are calculated by incrementing $YLL(t)$ and $YLD(t)$ for each cycle $t$. For each cycle spent in a diseased state, $YLD_i(t)$ increments by
+
+$$
+D\frac{1}{r_{\Delta_t}}(1-e^{-r_{\Delta_t}}) \Delta_t  e^{-rt}
+$$ {#eq-ms-yld} where $D$ is the relevant disease weight and $r_{\Delta_t}$ is the cycle discount rate (as defined in the sections above).
+
+For the cycle in which the simulated patient dies due to disease-related causes (and *only* for that cycle), $YLL_i(t)$ increments by $$
+\frac{1}{r}\big (1 - e^{-rEx(a(t))} \big ) e^{-rt}
+$$ {#eq-ms-yll} DALYs for each simulated patient are then averaged to estimate the average DALYs in the model.
+
+@tbl-mstrace applies our framework to a microsimulation setting based on the example of the 35 year old woman with bipolar disorder from @rushby2001 discussed above. Specifically, for each cycle ($t$) and associated age $a(t)$, the column $s(t)$ tracks the health state of the individual from birth ($t=0$) through age 100. In keeping with the example, the probabilities underlying cycle progressions are set such that the simulated patient remains healthy from birth until age 35. At age 35, she becomes sick (i.e., s(35)="S"). The patient remains in the "Sick" health state for ten years, until age 45, when she transitions to death from the disease. The patient then remains in the "Dead" health state for the remainder of the 101-year model time horizon.
+
+$YLD(t)$ and $YLL(t)$ are calculated in each cycle using the Equations @eq-ms-yld and @eq-ms-yll, and are summed across the model time horizon to yield an estimate of the total DALYs for the simulated patient. The estimated total (discounted) YLD, YLL and DALY outcome values for the hypothetical simulated patient are identical to those calculated in the section on discounting above.
+
+```{r, echo = FALSE}
+
+df_ms <- 
+  tibble(cycle = 0:100, at = 0:100, Healthy = 0, Sick = 0, Dead = 0, trYLL = 0) %>% 
+ mutate(s_t  = c(rep("H",35),rep("S",10),rep("D",56))) %>% 
+  mutate(Healthy = ifelse(cycle<35,1,0),
+         Sick = ifelse(between(cycle,35,44),1,0),
+         Dead = ifelse(cycle>=45,1,0),
+         trYLL = ifelse(cycle==45,1,0))
+tr_ms <- 
+  df_ms %>% dplyr::select(Healthy,Sick,Dead,trYLL) %>% 
+  as.matrix()
+d_ms <- c(0,0.6 * (1/.03)*(1-exp(-0.03)),0,0)
+YLD_t <- (tr_ms %*% as.matrix(d_ms)) 
+
+ExR =  # Source: https://www.un.org/development/desa/pd/data/model-life-tables
+  # Chilean Female Life Expectancy with a Life Expectancy at Birth of 75 years.
+  tibble::tribble(
+          ~Age, ~Life.Expectancy,
+            0L,               75,
+            1L,            77.04,
+            2L,            76.26,
+            3L,            75.36,
+            4L,            74.42,
+            5L,            73.46,
+            6L,            72.49,
+            7L,            71.51,
+            8L,            70.53,
+            9L,            69.54,
+           10L,            68.56,
+           11L,            67.57,
+           12L,            66.59,
+           13L,             65.6,
+           14L,            64.61,
+           15L,            63.63,
+           16L,            62.65,
+           17L,            61.67,
+           18L,            60.69,
+           19L,            59.71,
+           20L,            58.73,
+           21L,            57.76,
+           22L,            56.78,
+           23L,            55.81,
+           24L,            54.84,
+           25L,            53.87,
+           26L,             52.9,
+           27L,            51.93,
+           28L,            50.97,
+           29L,               50,
+           30L,            49.04,
+           31L,            48.08,
+           32L,            47.12,
+           33L,            46.16,
+           34L,             45.2,
+           35L,            44.24,
+           36L,            43.29,
+           37L,            42.34,
+           38L,            41.39,
+           39L,            40.45,
+           40L,            39.51,
+           41L,            38.57,
+           42L,            37.64,
+           43L,            36.71,
+           44L,            35.78,
+           45L,            34.73,  # NOTE: HARD CODED 34.73 here (from original 34.86) to exactly match FHD results. 
+           46L,            33.95,
+           47L,            33.04,
+           48L,            32.13,
+           49L,            31.23,
+           50L,            30.33,
+           51L,            29.44,
+           52L,            28.56,
+           53L,            27.68,
+           54L,             26.8,
+           55L,            25.94,
+           56L,            25.08,
+           57L,            24.24,
+           58L,             23.4,
+           59L,            22.57,
+           60L,            21.75,
+           61L,            20.94,
+           62L,            20.14,
+           63L,            19.36,
+           64L,            18.59,
+           65L,            17.83,
+           66L,             17.1,
+           67L,            16.39,
+           68L,             15.7,
+           69L,            15.02,
+           70L,            14.36,
+           71L,            13.72,
+           72L,            13.09,
+           73L,            12.48,
+           74L,            11.88,
+           75L,             11.3,
+           76L,            10.73,
+           77L,            10.17,
+           78L,             9.63,
+           79L,             9.11,
+           80L,             8.61,
+           81L,             8.14,
+           82L,             7.69,
+           83L,             7.26,
+           84L,             6.85,
+           85L,             6.46,
+           86L,             6.09,
+           87L,             5.74,
+           88L,              5.4,
+           89L,             5.09,
+           90L,             4.79,
+           91L,             4.51,
+           92L,             4.25,
+           93L,                4,
+           94L,             3.77,
+           95L,             3.55,
+           96L,             3.35,
+           97L,             3.16,
+           98L,             2.98,
+           99L,             2.82,
+          100L,             2.67,
+          101L,             2.53,
+          102L,              2.4,
+          103L,             2.28,
+          104L,             2.17,
+          105L,             2.07,
+          106L,             1.97,
+          107L,             1.89,
+          108L,             1.81,
+          109L,             1.74,
+          110L,             1.67
+          )
+
+
+fExR_ms <- function(x) pmax(0,unname(Hmisc::approxExtrap(ExR$Age, ExR$Life.Expectancy,xout = x)$y))
+
+horizon = 100
+Delta_t = 1
+age0 = 0
+ages = (0:(horizon/Delta_t))*Delta_t + age0
+dwS = 0.6
+r = 0.03
+r_Delta_t = r * Delta_t
+n_cycles = 100
+
+et = 
+  ages %>% map(~({
+    c(0,0,0,(1/r)*(1-exp(-r*fExR_ms(.x)))) 
+    }))
+
+YLL_t <- map2_dbl(0:(n_cycles),et,~({t(as.matrix(tr_ms[.x +1, ])) %*% .y}))
+
+
+fmlas_ms <- 
+    tibble(
+      total = "",
+      cycle = "t",
+      #
+           at = "a(t)",
+s_t = "s(t)",      
+           #Healthy = "Healthy",
+           #Sick = "Sick",
+           #Dead = "Dead",
+           #trYLL = "trYLL",
+           et = "e(t)",
+           #cycle_adj = "Cycle Adj.",
+           YLDt = "YLD(t)",
+           YLLt = "YLL(t)",
+           DALYt = "DALY(t)")
+
+df_ms_final <- 
+  df_ms %>% 
+  mutate(et = fExR_ms(at)) %>% 
+  #mutate(cycle_adj = alt_simp_coef(101)) %>% 
+  mutate(YLDt = as.vector(unname(YLD_t)),
+         YLLt = unname(YLL_t), 
+         DALYt = as.vector(unname(YLD_t + YLL_t))) %>% 
+  mutate_at(vars(YLDt,YLLt,DALYt),function(x) x*  exp(-.03*0:100))
+
+dots <- 
+    tibble(
+          total = "",
+          cycle = "...",
+           at = "...",
+          s_t = "...",
+           #Healthy = "...",
+           #Sick = "...",
+           #Dead = "...",
+           #trYLL = "...",
+           et = "...",
+          # cycle_adj = "...",
+           YLDt = "...",
+           YLLt = "...",
+           DALYt = "...")
+
+
+
+```
+
+```{r, results = 'asis'}
+#| echo: false
+#| label: tbl-mstrace
+#| tbl-cap: Example Patient Trajectory and DALY Outcomes in a  Microsimulation Model
+#| message: false
+#| warning: false
+ 
+
+bind_rows(
+    df_ms_final %>%  
+      select(-cycle,-Healthy,-Sick,-Dead,-trYLL,) %>% 
+        mutate_at(vars(et,YLDt,YLLt,DALYt),
+                  function(x) sprintf("%.3f", round(x, 4))) %>%
+        mutate(at = sprintf("%.0f",as.numeric(at))) %>% 
+        rownames_to_column(var = "cycle") %>% 
+        mutate(cycle = paste0(as.numeric(cycle)-1)) %>% 
+      mutate(total = "") %>% 
+      select(total,cycle, at,s_t,everything()) %>% 
+      head(n = 3),
+    
+    dots, 
+    
+     df_ms_final %>%  
+        select(-cycle,-Healthy,-Sick,-Dead,-trYLL,) %>% 
+        mutate_at(vars(et,YLDt,YLLt,DALYt),
+                  function(x) sprintf("%.3f", round(x, 4))) %>%
+        mutate(at = sprintf("%.0f",as.numeric(at))) %>% 
+        rownames_to_column(var = "cycle") %>% 
+        mutate(cycle = paste0(as.numeric(cycle)-1)) %>% 
+      filter(as.numeric(cycle)>=35) %>% 
+      mutate(total = "") %>% 
+      select(total,cycle,at,s_t,everything()) %>% 
+      head(n = 12), 
+    
+    dots, 
+     df_ms_final %>%  
+      select(-cycle,-Healthy,-Sick,-Dead,-trYLL,) %>% 
+        mutate_at(vars(et,YLDt,YLLt,DALYt),
+                  function(x) sprintf("%.3f", round(x, 4))) %>%
+        mutate(at = sprintf("%.0f",as.numeric(at))) %>% 
+        rownames_to_column(var = "cycle") %>% 
+        mutate(cycle = paste0(as.numeric(cycle)-1)) %>% 
+      filter(as.numeric(cycle)>=44) %>% 
+      mutate(total = "") %>% 
+      select(total,cycle,at,s_t,everything()) %>% 
+      tail(n = 3)
+  
+) %>%
+    dplyr::select(total, everything()) %>%
+    bind_rows({
+        df_ms_final %>%
+            summarise_at(vars(YLDt, YLLt, DALYt), ~alt_simp(.,h=1)) %>%
+            mutate_all(function(x)
+                sprintf("%.3f", round(x, 4))) %>% 
+            mutate(total = "Total")
+    }) %>%
+    kable(booktabs=T, escape = F, col.names= c(fmlas_ms)) %>% 
+    kable_styling(font_size = 8, position = 'center',latex_options = 'HOLD_position') 
+    
+    #add_footnote(c("(ref:test)","two"),notation="symbol")
+
+rstar = log(1/(1+r_ann))
+Qstar = Q + rstar*diag(nrow(Q))
+#((s0T %*% (expm(Qstar * horizon) - diag(nrow(Q))) %*% ginv(Qstar) %*% d_)) 
+
+
+```
+
+### Discrete Event Simulation
+
+Like microsimulation, DES models incorporate the timing and interdependency of events [@graves2021]. DES models do so by simulating event times for transitions among health states (e.g., onset of disease time) and other events (e.g., occurance of an adverse event, such as a hospitalization, associated with the disease) [@karnon2012; @caro2016]. For a given simulated patient, the specific timing and sequencing of events is calculated by observing which of the events happen first, and (as needed) re-drawing new event times conditional on the occurrence of past events. Because subsequent event times can rely on the existence or duration of prior events, DES models are (like microsimulation) not limited by the "memoryless" property of Markov cohort models.
+
+Estimating DALY outcomes in a DES is relatively straightforward because the duration of illness (for YLD outcomes) and time of death from disease (for YLL outcomes) can be calculated directly from the simulated event times. @tbl-des, for example, provides simulated event times for two hypothetical patients. The first (Patient ID 1) is the example bipolar patient discussed above. This patient experiences disease onset at age 35, lives with the disease for 10 years, and then dies of disease related causes.
+
+The second patient (Patient ID 2) experiences disease onset at $t=61.23$ years and dies of background mortality causes at time $t= 72.4$. She does have a simulated death time from the disease (at $t=93.1$), however this event is never realized because she dies of background causes first.
+
+```{r}
+#| echo: false
+#| label: tbl-des
+#| tbl-cap: Event Times and Outcomes for Discrete Event Simulation
+#| message: false
+#| warning: false
+
+  tibble(id = c("1","2"), t_Sick = c(35.0,61.23), t_Dead_Disease = c(45.0,93.1), t_Dead_Other = c(83.37,72.4)) %>% 
+  mutate(L = pmax(0,pmin(t_Dead_Disease,t_Dead_Other)-t_Sick)) %>% 
+  mutate(YLD = exp(-.03*t_Sick)*(1/.03)*0.6*(1-exp(-.03*(t_Dead_Disease - t_Sick)))) %>% 
+  mutate(YLL = as.integer(t_Dead_Disease<t_Dead_Other)*exp(-.03*t_Dead_Disease)*(1/.03)*(1-exp(-.03*fExR_ms(t_Dead_Disease))))  %>% 
+  mutate(DALY = YLL + YLD) %>% 
+  mutate_at(vars(t_Sick, t_Dead_Disease, t_Dead_Other,YLL, YLD,DALY),function(x)
+                sprintf("%.3f", round(x, 4))) %>% 
+  kable(booktabs=T, escape = F,col.names = c("Patient ID", "Time Sick", "Time Dead (Disease)", "Time Dead (Non-Disease)","L","YLD","YLL","DALY")) %>% 
+  kable_styling(font_size = 8, position = 'center',latex_options = 'HOLD_position')
+
+```
+
+Using these event times we can calculate $L$, the duration of time living with the disease, as $$
+L = \max \bigg (0, \min \big (t(DeadDisease),t(DeadBackground) \big )-t(Sick) \bigg )
+$$ where $t(DeadDisease)$ is the simulated time of death from the disease, $t(DeadBackground)$ is the simulated time of death from other non-disease causes, and $t(Sick)$ is the simulated time of disease onset.
+
+We next couple $L$ with the disease weight $D$, and apply discounting as needed at time $t(Sick)$, to yield an estimate of YLDs for the simulated patient: $$
+YLD = \big (D\frac{1}{r}(1-e^{-rL})  \big) \times e^{-rt(Sick)}
+$$ {#eq-des-yld}
+
+Similarly, we can calculate YLL outcomes for individuals who die from the disease as $$
+YLL = 1 \big [t(DeadDisease) < t(DeadBackground) \big ] \times \frac{1}{r}(1 - e^{-r Ex(a(t(DeadDisease)))}) \times e^{-rt(DeadDisease)}
+$$ {#eq-des-yll} where $1 \big [t(DeadDisease) < t(DeadBackground) \big ]$ is an indicator function set to one if the individual's simulated death time from the disease is less than their simulated death time from non-disease causes, and zero otherwise. Moreover, $Ex(a(t(DeadDisease)))$ is the remaining life expectancy of the individual at their time of death from the disease.
+
+Applying these formulas to the hypothetical DES simulated patients in @tbl-des yields an estimate of YLDs, YLLs and DALYs for Patient 1 that is identical to the bipolar example patient discussed above.
+
+# Application: A Natural History Model of Cardiovascular Disease Burden
+
+## Model Structure
+
+## Data and Parameters
+
+### Life Table Data
+
+### Transition Probability Matrix
+
+The exponential of the transition intensity matrix is calculated as a Taylor series expansion
+
+$$
+e^Q=I+Q+\frac{Q^2}{2 !}+\frac{Q^3}{3 !}+\frac{Q^4}{4 !}+\ldots
+$$
+
+## References
+
+::: {#refs}
+:::
+
+```{r, eval = FALSE}
+#| echo: false
+knitr::purl(here::here("manuscript/modeling-dalys_v1.0.qmd"),output=here::here("R/modeling-dalys_v1.0.r"))
+```
