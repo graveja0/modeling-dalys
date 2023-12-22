@@ -1,0 +1,465 @@
+---
+title: "Sandbox: FHD"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+# Introduction
+
+This document is an attempt to simplify the formulas and get our heads around discounting.
+
+```{r setup}
+#| echo: false
+#| warning: false
+#| message: false
+
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(survival)
+library(flexsurv)
+library(haven)
+library(dampack)
+library(Matrix)
+library(here)
+library(demography)
+library(MortalityLaws)
+library(demography)
+library(MASS)
+library(directlabels)
+library(ggthemes)
+library(expm)
+library(gt)
+library(janitor)
+library(directlabels)
+library(glue)
+library(ggsci)
+library(data.table)
+options(knitr.kable.NA = '')
+theme_set(hrbrthemes::theme_ipsum(base_family = "Arial"))
+options("scipen" = 100, "digits" = 5)
+select <- dplyr::select
+transpose <- purrr::transpose
+
+ExR = 
+    # Global Burden of Disease Collaborative Network. Global Burden of Disease Study 
+    # 2019 (GBD 2019) Reference Life Table. Seattle, United States of America: 
+    # Institute for Health Metrics and Evaluation (IHME), 2020
+    tibble::tribble(
+        ~Age, ~Life.Expectancy,
+        0L,       88.8718951,
+        1L,      88.00051053,
+        5L,      84.03008056,
+        10L,      79.04633476,
+        15L,       74.0665492,
+        20L,      69.10756792,
+        25L,      64.14930031,
+        30L,       59.1962771,
+        35L,      54.25261364,
+        40L,      49.31739311,
+        45L,      44.43332057,
+        50L,      39.63473787,
+        55L,      34.91488095,
+        60L,      30.25343822,
+        65L,      25.68089534,
+        70L,      21.28820012,
+        75L,      17.10351469,
+        80L,      13.23872477,
+        85L,      9.990181244,
+        90L,      7.617724915,
+        95L,      5.922359078
+    )
+
+ExR =  # Source: https://www.un.org/development/desa/pd/data/model-life-tables
+  # Chilean Female Life Expectancy with a Life Expectancy at Birth of 75 years.
+  tibble::tribble(
+          ~Age, ~Life.Expectancy,
+            0L,               75,
+            1L,            77.04,
+            2L,            76.26,
+            3L,            75.36,
+            4L,            74.42,
+            5L,            73.46,
+            6L,            72.49,
+            7L,            71.51,
+            8L,            70.53,
+            9L,            69.54,
+           10L,            68.56,
+           11L,            67.57,
+           12L,            66.59,
+           13L,             65.6,
+           14L,            64.61,
+           15L,            63.63,
+           16L,            62.65,
+           17L,            61.67,
+           18L,            60.69,
+           19L,            59.71,
+           20L,            58.73,
+           21L,            57.76,
+           22L,            56.78,
+           23L,            55.81,
+           24L,            54.84,
+           25L,            53.87,
+           26L,             52.9,
+           27L,            51.93,
+           28L,            50.97,
+           29L,               50,
+           30L,            49.04,
+           31L,            48.08,
+           32L,            47.12,
+           33L,            46.16,
+           34L,             45.2,
+           35L,            44.24,
+           36L,            43.29,
+           37L,            42.34,
+           38L,            41.39,
+           39L,            40.45,
+           40L,            39.51,
+           41L,            38.57,
+           42L,            37.64,
+           43L,            36.71,
+           44L,            35.78,
+           45L,            34.73,  # NOTE: HARD CODED 34.73 here (from original 34.86) to exactly match FHD results. 
+           46L,            33.95,
+           47L,            33.04,
+           48L,            32.13,
+           49L,            31.23,
+           50L,            30.33,
+           51L,            29.44,
+           52L,            28.56,
+           53L,            27.68,
+           54L,             26.8,
+           55L,            25.94,
+           56L,            25.08,
+           57L,            24.24,
+           58L,             23.4,
+           59L,            22.57,
+           60L,            21.75,
+           61L,            20.94,
+           62L,            20.14,
+           63L,            19.36,
+           64L,            18.59,
+           65L,            17.83,
+           66L,             17.1,
+           67L,            16.39,
+           68L,             15.7,
+           69L,            15.02,
+           70L,            14.36,
+           71L,            13.72,
+           72L,            13.09,
+           73L,            12.48,
+           74L,            11.88,
+           75L,             11.3,
+           76L,            10.73,
+           77L,            10.17,
+           78L,             9.63,
+           79L,             9.11,
+           80L,             8.61,
+           81L,             8.14,
+           82L,             7.69,
+           83L,             7.26,
+           84L,             6.85,
+           85L,             6.46,
+           86L,             6.09,
+           87L,             5.74,
+           88L,              5.4,
+           89L,             5.09,
+           90L,             4.79,
+           91L,             4.51,
+           92L,             4.25,
+           93L,                4,
+           94L,             3.77,
+           95L,             3.55,
+           96L,             3.35,
+           97L,             3.16,
+           98L,             2.98,
+           99L,             2.82,
+          100L,             2.67,
+          101L,             2.53,
+          102L,              2.4,
+          103L,             2.28,
+          104L,             2.17,
+          105L,             2.07,
+          106L,             1.97,
+          107L,             1.89,
+          108L,             1.81,
+          109L,             1.74,
+          110L,             1.67
+          )
+
+
+fExR <- function(x) pmax(0,unname(Hmisc::approxExtrap(ExR$Age, ExR$Life.Expectancy,xout = x)$y))
+
+alt_simp_coef <- function(i) c(17, 59, 43, 49, rep(48, i-8), 49, 43, 59, 17) / 48
+alt_simp      <- function(x,h) h*sum(alt_simp_coef(length(x)) * x)
+
+gbd <- # Constructed in here("_data/_gbd/download-and-construct-gbd-lifetables.r")
+    readRDS(here("_data/_gbd/life-tables-2019.rds"))
+
+hp <- 
+    gbd %>% 
+    select(location_id, location_name, hp_mort) %>% 
+    mutate(hp_mort = map(hp_mort,~(data.frame(.x)))) %>% 
+    unnest(cols = c(hp_mort))
+
+get_hp_mort <- function(x,location="Global") {
+    params_ <- 
+        hp %>% 
+        filter(location_name==location) %>% 
+        ungroup() %>% 
+        select(-location_id, -location_name) %>% 
+        as.list()
+    with(params_,{
+        mu1 = A^((x + B)^C) + G * H^x
+        mu2 = D * exp(-E * (log(x/F_))^2)
+        eta = ifelse(x == 0, mu1, mu1 + mu2)
+        hx  = eta/(1 + eta)
+        hx
+    })
+}
+
+```
+
+# Parameterize
+
+```{r}
+params = 
+    list(
+        t_names = c("fhd", "fhd_tx"),
+        n_treatments = 2,
+        s_names = c("Healthy","Sick","Dead"), 
+        n_states = 3,
+        n_cohort = 10,
+        age0 = 0, 
+        horizon = 110,
+        Delta_t = 1,
+        rD = get_hp_mort,
+        rSD = get_hp_mort(50),
+        rSD_tx = 0,
+        rHS = 0.05,
+        dwS = 0.6,
+        r_ann = 0.03,
+        Ex = fExR
+    )
+params = modifyList(params,with(params,({
+    list(
+    n_cycles = horizon/Delta_t,
+    r_Delta_t = r_ann * Delta_t,
+    s0T = c(1,0,0,0),
+    ages = (0:(horizon/Delta_t))*Delta_t + age0
+    )
+})))
+```
+
+# Transition Rate Matrices
+
+```{r}
+# dies on day 28835+48
+
+fQt <- function(t, params, t0 = FALSE)
+ {
+   with(params, {
+       lapply(t, function(tt){
+          current_age <- age0 + tt*Delta_t; current_age
+          rD_ <- rD(current_age)
+          if (tt>0) {
+            tmp_ <-
+            array(data = 
+                      c(0,0,0,0,
+                     rHS,0,0,0,
+                     rD(current_age),rD(current_age)+rSD,0,0,
+                     0,rSD,0,0,
+                     
+                     
+                     0,0,0,0,
+                     rHS,0,0,0,
+                     rD(current_age),rD(current_age),0,0,
+                     0,0,0,0),
+                  
+                  dim = c(n_states+1, n_states+1, n_treatments),
+                  dimnames = list(from = c(s_names,"trYLL"),
+                                  to = c(s_names,"trYLL"),
+                                  t_names)) %>% 
+              apply(.,3,function(x) x, simplify = FALSE)  
+          } else {
+            tmp_ <-
+            array(data = 
+                      c(0,0,0,0,
+                     0,0,0,0,
+                     0,0,0,0,
+                     0,0,0,0,
+                     
+                     
+                     0,0,0,0,
+                     0,0,0,0,
+                     0,0,0,0,
+                     0,0,0,0),
+                  
+                  dim = c(n_states+1, n_states+1, n_treatments),
+                  dimnames = list(from = c(s_names,"trYLL"),
+                                  to = c(s_names,"trYLL"),
+                                  t_names)) %>% 
+              apply(.,3,function(x) x, simplify = FALSE)  
+          }
+         
+          }) %>% pluck(1)
+  })
+}
+
+params$Q = 0:params$n_cycles %>% map(~fQt(.x,params))
+
+params$Q =
+  params$Q %>% map( ~ ({
+    .x %>% map( ~ ({
+      q_ = .x
+      diag(q_) = -rowSums(q_)
+      q_
+    }))
+  }))
+
+```
+
+# Transition Probability Matrices
+
+```{r}
+params$P =
+  params$Q %>% map( ~ ({
+    .x %>% map( ~ ({
+      p_ = expm(.x)
+      p_["trYLL", "trYLL"] = 0
+      p_
+    }))
+  }))
+```
+
+# Markov Trace
+
+```{r}
+trace <- 
+  params$P %>% 
+  purrr::transpose() %>% 
+  map(~({
+    s = params$s0T
+    .x %>% map_df(~({
+      s <<- s %*% .x
+      data.frame(s)
+    }))
+  }))
+```
+
+# Payoff Vectors
+
+```{r}
+
+params$d = with(params,c(0,dwS * (1/r_Delta_t)*(1-exp(-r_Delta_t)),0,0))
+
+params$et = with(params,{
+  ages %>% map(~({
+    c(0,0,0,(1/r_ann)*(1-exp(-r_ann*Ex(.x)))) 
+    }))
+})
+
+params$y = with(params,{
+  ages %>% map(~({
+    c(0,dwS * (1/r_Delta_t)*(1-exp(-r_Delta_t)),0,(1/r_ann)*(1-exp(-r_ann*Ex(.x)))) 
+    }))
+})
+```
+
+# Outcomes
+
+```{r}
+
+disc_cont = with(params,0:n_cycles %>% map_dbl(~({exp(-r_ann * Delta_t * .x)})))
+
+YLDt = 
+  with(params,{
+    trace %>% map(~(
+    as.vector(as.matrix(.x) %*% d) * Delta_t
+  ))
+  }) %>% 
+  cbind.data.frame() %>% 
+  mutate(disc = disc_cont)
+
+YLLt = 
+  with(params,{
+    trace %>% map(~({
+      tr_ = .x
+      map2_dbl(0:(n_cycles),et,~({as.matrix(tr_[.x+1,]) %*% as.matrix(.y)}))
+    }))
+  }) %>% 
+  cbind.data.frame() %>% 
+  mutate(disc = disc_cont)
+  
+DALYt = 
+  with(params,{
+    trace %>% map(~({
+      tr_ = .x
+      map2_dbl(0:(n_cycles),y,~({as.matrix(tr_[.x+1,]) %*% as.matrix(.y)}))
+    }))
+  }) %>% 
+  cbind.data.frame() %>% 
+  mutate(disc = disc_cont)
+
+YLDt %>% 
+  summarise_at(1:2,~(sum(.x * disc_cont)))
+
+YLLt %>% 
+  summarise_at(1:2,~(sum(.x * disc_cont)))
+
+DALYt %>% 
+  summarise_at(1:2,~(sum(.x * disc_cont)))
+```
+
+
+
+```{r, eval = FALSE}
+
+which_cycle_sick = which(params$ages==35)   # Seed 22
+which_cycle_dead = which(params$ages==45)
+
+test <- function(seed) {
+  set.seed(seed)
+  
+  tryCatch({
+    occ = params$P %>% 
+    purrr::transpose() %>% 
+    pluck(1) %>% 
+    map_chr(~(as.matrix(.x) %>% .[1,-4] %>% tibble() %>% set_names("pr") %>%  mutate(state = params$s_names) %>% 
+            arrange(desc(state)) %>% 
+            mutate(pr = cumsum(pr)) %>% 
+            mutate(rand = runif(1)) %>% 
+            mutate(rand_lt = as.integer(rand <= pr)) %>% 
+            filter(rand_lt==1) %>% 
+            filter(row_number()==1) %>% 
+            pluck("state"))) 
+    return(which(occ=="Sick")[1] == which_cycle_sick)
+  }, 
+  error = function(x) {
+    paste0("test") 
+    return(FALSE)
+    })
+  
+}
+
+foo <- 1:100 %>% map_lgl(~(test(.x)))
+
+
+
+
+.x = 
+  params$P %>% 
+  purrr::transpose()  %>% 
+  pluck(1)
+
+.x = .x[[2]] %>% as.matrix() ; .x
+
+sample(params$s_names, 1, prob = .x[1,-4])
+
+1:10 %>% map(~{
+  set.seed(.x)
+  
+})
+```
+
